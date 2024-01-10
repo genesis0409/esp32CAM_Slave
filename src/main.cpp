@@ -109,11 +109,13 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
             File file = SPIFFS.open("/moon.jpg");
             Serial.println(file.size());
             file.close();
+
+            // 파일 닫기 전후 쯤 firebase 저장기능 추가해야지 싶은데?
         }
 
         break;
     } // end case
-} // end
+} // end OnDataRecv
 
 // Init ESP Now with fallback
 void InitESPNow()
