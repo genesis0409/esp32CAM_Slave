@@ -12,7 +12,7 @@
 #include <esp_now.h>
 #include <WiFi.h>
 #define CHANNEL 1
-#include "SPIFFS.h"
+#include "SPIFFS.h" // already included
 
 int currentTransmitCurrentPosition = 0;
 int currentTransmitTotalPackages = 0;
@@ -22,6 +22,41 @@ int currentTransmitTotalPackages = 0;
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len);
 void InitESPNow();
 void configDeviceAP();
+
+// Firebase Tutorial
+#include "userCredential.h"
+
+#include "Arduino.h"
+#include "soc/soc.h"          // Disable brownout problems
+#include "soc/rtc_cntl_reg.h" // Disable brownout problems
+#include "driver/rtc_io.h"
+// #include <LittleFS.h>
+// #include <SPIFFS.h>
+#include <FS.h>
+#include <Firebase_ESP_Client.h>
+
+// Provide the token generation process info.
+#include <addons/TokenHelper.h>
+
+// Replace with your network credentials
+const char *ssid = "REPLACE_WITH_YOUR_SSID";
+const char *password = "REPLACE_WITH_YOUR_PASSWORD";
+
+// Insert Firebase project API Key
+#define API_KEY "AIzaSyBVjlrZ4uVERHfE5H9c2UoZvrbNE9YyWqs"
+
+// Insert Authorized Email and Corresponding Password - OR add "userCredential.h"
+// #define USER_EMAIL ""
+// #define USER_PASSWORD ""
+
+// Insert Firebase storage bucket ID e.g bucket-name.appspot.com
+#define STORAGE_BUCKET_ID "REPLACE_WITH_YOUR_STORAGE_BUCKET_ID"
+// For example:
+// #define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
+
+// Photo File Name to save in LittleFS
+#define FILE_PHOTO_PATH "/photo.jpg"
+#define BUCKET_PHOTO "/data/photo.jpg"
 
 void setup()
 {
