@@ -16,15 +16,70 @@
 
 int currentTransmitCurrentPosition = 0;
 int currentTransmitTotalPackages = 0;
-// byte showImage = 0;
 
 // 메소드 선언부
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len);
 void InitESPNow();
 void configDeviceAP();
 
+// WifiManager
+void initSPIFFS();                                                 // Initialize SPIFFS
+String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
+void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
+bool initWiFi();                                                   // Initialize WiFi
+
+// Search for parameter in HTTP POST request
+const char *PARAM_INPUT_1 = "ssid";
+const char *PARAM_INPUT_2 = "pass";
+const char *PARAM_INPUT_3 = "ip";
+const char *PARAM_INPUT_4 = "gateway";
+
+const char *PARAM_INPUT_5 = "Firebase API Key";
+const char *PARAM_INPUT_6 = "Storage Bucket ID";
+const char *PARAM_INPUT_7 = "user_email";
+const char *PARAM_INPUT_8 = "user_password";
+
+// Variables to save values from HTML form
+String ssid;
+String pass;
+String ip;
+String gateway;
+
+String api_key;
+String bucket_id;
+String user_email;
+String user_password;
+
+// File paths to save input values permanently
+const char *ssidPath = "/ssid.txt";
+const char *passPath = "/pass.txt";
+const char *ipPath = "/ip.txt";
+const char *gatewayPath = "/gateway.txt";
+
+const char *api_keyPath = "/api_key.txt";
+const char *bucket_idPath = "/bucket_id.txt";
+const char *user_emailPath = "/user_email.txt";
+const char *user_passwordPath = "/user_password.txt";
+
+IPAddress localIP;
+// IPAddress localIP(192, 168, 1, 200); // hardcoded
+
+// Set your Gateway IP address
+IPAddress localGateway;
+// IPAddress localGateway(192, 168, 1, 1); //hardcoded
+IPAddress subnet(255, 255, 255, 0);
+
+// Timer variables
+unsigned long currentMillis = 0;
+unsigned long previousMillis = 0; // Stores last time using Reference time
+const long interval = 10000;      // interval to wait for Wi-Fi connection (milliseconds)
+
+// for photo name
+int pictureNumber = 1;
+const uint32_t n_zero = 7; // zero padding
+
 // Firebase Tutorial
-#include "userCredential.h"
+#include "userCredential.h" // wifimanager 입력을 사용하지 않을 때, 로컬 하드코딩때 사용
 
 #include "Arduino.h"
 #include "soc/soc.h"          // Disable brownout problems
@@ -37,6 +92,7 @@ void configDeviceAP();
 
 // Provide the token generation process info.
 #include <addons/TokenHelper.h>
+#include "ESPAsyncWebServer.h"
 
 // Replace with your network credentials
 // const char *ssid = "REPLACE_WITH_YOUR_SSID";
@@ -55,21 +111,90 @@ void configDeviceAP();
 
 // Photo File Name to save in LittleFS/SPIFFS
 #define FILE_PHOTO_PATH "/photo.jpg"
+
+// Photo File Path to save in Firebase storage bucket
+// final path: /data/{camid}/photo.jpg
 #define BUCKET_PHOTO_PATH "/data"
+
+String camId;
 
 void setup()
 {
     Serial.begin(115200);
     Serial.println("ESPNow/Slave");
 
-    // start spiffs
-    if (!SPIFFS.begin(true))
+    initSPIFFS();
+
+    // esp가 스테이션 모드에서 성공적으로 연결된 이후
+    // 웹 서버 요청을 처리하는 명령
+    if (initWiFi())
     {
-        Serial.println(F("ERROR: File System Mount Failed!"));
     }
+    // 스테이션 모드 연결 실패 시 AP모드 진입(wifi 재설정) softAP() 메소드
     else
     {
-        Serial.println(F("Success Init SPIFFS"));
+        // Connect to Wi-Fi network with SSID and password
+        Serial.println("Setting AP (Access Point)");
+        // NULL sets an open Access Point
+        WiFi.softAP("ESP-WIFI-MANAGER", NULL);
+
+        IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
+        Serial.print("AP IP address: ");
+        Serial.println(IP);
+
+        // Web Server Root URL
+        // GET방식
+        server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                  { request->send(SPIFFS, "/wifimanager.html", "text/html"); });
+
+        server.serveStatic("/", SPIFFS, "/");
+        // POST방식
+        server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
+                  {
+      int params = request->params();
+      for(int i=0;i<params;i++){
+        AsyncWebParameter* p = request->getParam(i);
+        if(p->isPost()){
+          // HTTP POST ssid value
+          if (p->name() == PARAM_INPUT_1) {
+            ssid = p->value().c_str();
+            Serial.print("SSID set to: ");
+            Serial.println(ssid);
+            // Write file to save value
+            writeFile(SPIFFS, ssidPath, ssid.c_str());
+          }
+          // HTTP POST pass value
+          if (p->name() == PARAM_INPUT_2) {
+            pass = p->value().c_str();
+            Serial.print("Password set to: ");
+            Serial.println(pass);
+            // Write file to save value
+            writeFile(SPIFFS, passPath, pass.c_str());
+          }
+          // HTTP POST ip value
+          if (p->name() == PARAM_INPUT_3) {
+            ip = p->value().c_str();
+            Serial.print("IP Address set to: ");
+            Serial.println(ip);
+            // Write file to save value
+            writeFile(SPIFFS, ipPath, ip.c_str());
+          }
+          // HTTP POST gateway value
+          if (p->name() == PARAM_INPUT_4) {
+            gateway = p->value().c_str();
+            Serial.print("Gateway set to: ");
+            Serial.println(gateway);
+            // Write file to save value
+            writeFile(SPIFFS, gatewayPath, gateway.c_str());
+          }
+          //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+        }
+      }
+      // ESP가 양식 세부 정보를 수신했음을 알 수 있도록 일부 텍스트가 포함된 응답을 send
+      request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: " + ip);
+      delay(3000);
+      ESP.restart(); });
+        server.begin();
     }
 
     // Set device in AP mode to begin with
@@ -184,4 +309,99 @@ void configDeviceAP()
     {
         Serial.println("AP Config Success. Broadcasting with AP: " + String(SSID));
     }
+}
+
+// Initialize SPIFFS
+void initSPIFFS()
+{
+    // start spiffs
+    if (!SPIFFS.begin(true))
+    {
+        Serial.println(F("ERROR: File System Mount Failed!"));
+    }
+    else
+    {
+        Serial.println(F("Success Init SPIFFS"));
+    }
+}
+
+// Read File from SPIFFS
+String readFile(fs::FS &fs, const char *path)
+{
+    Serial.printf("Reading file: %s\r\n", path);
+
+    File file = fs.open(path);
+    if (!file || file.isDirectory())
+    {
+        Serial.println("- failed to open file for reading");
+        return String();
+    }
+
+    String fileContent;
+    while (file.available())
+    {
+        fileContent = file.readStringUntil('\n');
+        break;
+    }
+    return fileContent;
+}
+
+// Write file to SPIFFS
+void writeFile(fs::FS &fs, const char *path, const char *message)
+{
+    Serial.printf("Writing file: %s\r\n", path);
+
+    File file = fs.open(path, FILE_WRITE);
+    if (!file)
+    {
+        Serial.println("- failed to open file for writing");
+        return;
+    }
+    if (file.print(message))
+    {
+        Serial.println("- file written");
+    }
+    else
+    {
+        Serial.println("- write failed");
+    }
+}
+
+// Initialize WiFi
+bool initWiFi()
+{
+    if (ssid == "" || ip == "")
+    {
+        Serial.println("Undefined SSID or IP address.");
+        return false;
+    }
+
+    WiFi.mode(WIFI_STA);
+    localIP.fromString(ip.c_str());
+    localGateway.fromString(gateway.c_str());
+
+    if (!WiFi.config(localIP, localGateway, subnet))
+    {
+        Serial.println("STA Failed to configure");
+        return false;
+    }
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    Serial.println("Connecting to WiFi...");
+
+    unsigned long currentMillis = millis();
+    previousMillis = currentMillis;
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        currentMillis = millis();
+        if (currentMillis - previousMillis >= interval)
+        {
+            Serial.println("Failed to connect.");
+            return false;
+        }
+    }
+    Serial.print("Connected IP : ");
+    Serial.print(WiFi.localIP());
+    Serial.println("(Station Mode)");
+    return true;
 }
