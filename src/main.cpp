@@ -23,6 +23,12 @@ void InitESPNow();
 void configDeviceAP();
 
 // WifiManager
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+
+// Create AsyncWebServer object on port 80
+AsyncWebServer server(80);
+
 void initSPIFFS();                                                 // Initialize SPIFFS
 String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
@@ -92,7 +98,6 @@ const uint32_t n_zero = 7; // zero padding
 
 // Provide the token generation process info.
 #include <addons/TokenHelper.h>
-#include "ESPAsyncWebServer.h"
 
 // Replace with your network credentials
 // const char *ssid = "REPLACE_WITH_YOUR_SSID";
@@ -116,6 +121,7 @@ const uint32_t n_zero = 7; // zero padding
 // final path: /data/{camid}/photo.jpg
 #define BUCKET_PHOTO_PATH "/data"
 
+// Master cam id check
 String camId;
 
 void setup()
@@ -187,6 +193,42 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, gatewayPath, gateway.c_str());
           }
+          // HTTP POST API Key value
+          if (p->name() == PARAM_INPUT_5)
+          {
+              api_key = p->value().c_str();
+              Serial.print("API Key set to: ");
+              Serial.println(api_key);
+              // Write file to save value
+              writeFile(SPIFFS, api_keyPath, api_key.c_str());
+          }
+          // HTTP POST Bucket ID value
+          if (p->name() == PARAM_INPUT_6)
+          {
+              bucket_id = p->value().c_str();
+              Serial.print("Bucket ID set to: ");
+              Serial.println(bucket_id);
+              // Write file to save value
+              writeFile(SPIFFS, bucket_idPath, bucket_id.c_str());
+          }
+          // HTTP POST User Email value
+          if (p->name() == PARAM_INPUT_7)
+          {
+              user_email = p->value().c_str();
+              Serial.print("User Email set to: ");
+              Serial.println(user_email);
+              // Write file to save value
+              writeFile(SPIFFS, user_emailPath, user_email.c_str());
+          }
+          // HTTP User Password value
+          if (p->name() == PARAM_INPUT_8)
+          {
+              user_password = p->value().c_str();
+              Serial.print("API Key set to: ");
+              Serial.println(user_password);
+              // Write file to save value
+              writeFile(SPIFFS, user_passwordPath, user_password.c_str());
+          }
           //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
       }
@@ -198,7 +240,7 @@ void setup()
     }
 
     // Set device in AP mode to begin with
-    WiFi.mode(WIFI_AP);
+    WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
     // configure device AP mode
     configDeviceAP();
     // This is the mac address of the Slave in AP Mode
@@ -281,7 +323,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 // Init ESP Now with fallback
 void InitESPNow()
 {
-    WiFi.disconnect();
+    WiFi.disconnect(); // 끊지 않고 AP_STA 모드 활용하는 방안
     if (esp_now_init() == ESP_OK)
     {
         Serial.println("ESPNow Init Success");
