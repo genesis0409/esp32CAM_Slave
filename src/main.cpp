@@ -305,13 +305,13 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         currentTransmitCurrentPosition = 0;                    // 전송위치 초기화
         currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번재 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
         Serial.println("currentTransmitTotalPackages = " + String(currentTransmitTotalPackages));
-        SPIFFS.remove(path); // 이전 파일 삭제; 이름은 자유
+        SPIFFS.remove(path.c_str()); // 이전 파일 삭제; 이름은 자유; String 객체는 문자열 인자가 아님 -> 변환필요
         break;
     case 0x02: // sendNextPackage() 다음 패키지 전송을 위한 기능
         // Serial.println("chunk of file transmit");
         currentTransmitCurrentPosition = (*data++) << 8 | *data++; // 데이터 재구축: 같은 원리로 [현재 전송 위치] 복원
         // Serial.println("chunk NUMBER = " + String(currentTransmitCurrentPosition));
-        File file = SPIFFS.open(FILE_PHOTO_PATH, FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
+        File file = SPIFFS.open(path.c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
         if (!file)
             Serial.println("Error opening file ...");
 
