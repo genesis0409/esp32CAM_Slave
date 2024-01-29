@@ -8,7 +8,6 @@
 // for more information
 // https://www.youtube.com/watch?v=0s4Bm9Ar42U
 */
-
 #include <esp_now.h>
 #include <WiFi.h>
 #define CHANNEL 1
@@ -80,12 +79,18 @@ unsigned long currentMillis = 0;
 unsigned long previousMillis = 0; // Stores last time using Reference time
 const long interval = 10000;      // interval to wait for Wi-Fi connection (milliseconds)
 
+// Master cam id check
+int camId;
+const int NUMBERofMASTER = 2;
+
 // for photo name
-int pictureNumber = 1;
+int pictureNumber[NUMBERofMASTER] = {
+    0,
+};
 const uint32_t n_zero = 7; // zero padding
 
 // Firebase Tutorial
-#include "userCredential.h" // wifimanager 입력을 사용하지 않을 때, 로컬 하드코딩때 사용
+// #include "userCredential.h" // wifimanager 입력을 사용하지 않을 때, 로컬 하드코딩때 사용
 
 #include "Arduino.h"
 #include "soc/soc.h"          // Disable brownout problems
@@ -115,14 +120,21 @@ const uint32_t n_zero = 7; // zero padding
 // #define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
 
 // Photo File Name to save in LittleFS/SPIFFS
-#define FILE_PHOTO_PATH "/photo.jpg"
+#define FILE_PHOTO_NAME "photo"
 
 // Photo File Path to save in Firebase storage bucket
 // final path: /data/{camid}/photo.jpg
 #define BUCKET_PHOTO_PATH "/data"
 
-// Master cam id check
-String camId;
+// Define Firebase Data objects; 데이터 객체 정의
+FirebaseData fbdo;
+FirebaseAuth auth;
+FirebaseConfig configF;
+
+void fcsUploadCallback(FCS_UploadStatusInfo info);
+
+// Firebase에 성공적으로 연결되었는지 확인하는 bool 변수
+bool taskCompleted = false;
 
 void setup()
 {
@@ -240,7 +252,7 @@ void setup()
     }
 
     // Set device in AP mode to begin with
-    WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
+    WiFi.mode(WIFI_AP_STA); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
     // configure device AP mode
     configDeviceAP();
     // This is the mac address of the Slave in AP Mode
@@ -263,7 +275,7 @@ void loop()
     //     gfx->fillScreen(BLACK);
     //     unsigned long start = millis();
     //     jpegClass.draw(&SPIFFS,
-    //                    (char *)"FILE_PHOTO_PATH", jpegDrawCallback, true /* useBigEndian */,
+    //                    (char *)"FILE_PHOTO_NAME", jpegDrawCallback, true /* useBigEndian */,
     //                    0 /* x */, 0 /* y */, gfx->width() /* widthLimit */, gfx->height() /* heightLimit */);
 
     //     Serial.printf("Time used: %lu\n", millis() - start);
@@ -274,20 +286,26 @@ void loop()
 
 // callback when data is recv from Master
 // 콜백함수: 마스터로부터 데이터 수신 시: esp_now_send(peer_addr, dataArray, dataArrayLength);
+// espnow 메시지 데이터를 받으면 case 통과하면서 전부 처리됨
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 {
-    // 1:
-    // 2:
+    camId = (*data++);
+
+    std::string old_str = std::to_string(pictureNumber[camId]); // 0부터
+    std::string new_str = std::string(n_zero - std::min(n_zero, old_str.length()), '0') + old_str;
+
+    // Path where new picture will be saved in
+    std::string path = "/CAM" + std::to_string(camId) + "_" + new_str + ".jpg"; // /CAM0_0000001.jpg
+    pictureNumber[camId]++;
+
     switch (*data++) // *data++ == *(data++); 어떻게 해석해야될지 모르겠단말이지: *data(첫 번째 원소)로 switch넣고 나서 ++한다 -> 두 번째 원소 가리키도록 함
     {
-    case 0x00: // camID 등 송신자 정보 출력 용도, 케이스 메시지를 나눠야겠는데 CAMID 수만큼 ㄷㄷ
-        Serial.println();
     case 0x01: // startTransmit() 전송 시작을 알리는 메시지: 전송 데이터량 고지
         Serial.println("Start of new file transmit");
         currentTransmitCurrentPosition = 0;                    // 전송위치 초기화
         currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번재 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
         Serial.println("currentTransmitTotalPackages = " + String(currentTransmitTotalPackages));
-        SPIFFS.remove(FILE_PHOTO_PATH); // 이전 파일 삭제; 이름은 자유
+        SPIFFS.remove(path); // 이전 파일 삭제; 이름은 자유
         break;
     case 0x02: // sendNextPackage() 다음 패키지 전송을 위한 기능
         // Serial.println("chunk of file transmit");
@@ -297,7 +315,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         if (!file)
             Serial.println("Error opening file ...");
 
-        for (int i = 0; i < (data_len - 3); i++)
+        for (int i = 0; i < (data_len - 4); i++)
         {
             // byte dat = *data++;
             // Serial.println(dat);
@@ -309,7 +327,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         {
             // showImage = 1; // 삭제 예정 - 이미지 표시기능
             Serial.println("Done File Transfer");
-            File file = SPIFFS.open(FILE_PHOTO_PATH);
+            File file = SPIFFS.open(FILE_PHOTO_NAME);
             Serial.println(file.size());
             file.close();
 
