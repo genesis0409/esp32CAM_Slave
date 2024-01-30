@@ -161,10 +161,38 @@ void setup()
     {
         // initWiFi() &&
         //  Set device in AP mode to begin with
-        //  WiFi.mode(WIFI_AP_STA); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
-        WiFi.mode(WIFI_AP);
+        //  WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
+        // WiFi.mode(WIFI_AP_STA);
+
+        initWiFi();
+        // begin wifi
+        /*
+                WiFi.begin(ssid.c_str(), pass.c_str(), CHANNEL);
+                Serial.println("Connecting to WiFi...");
+
+                unsigned long currentMillis = millis();
+                previousMillis = currentMillis;
+
+                while (WiFi.status() != WL_CONNECTED)
+                {
+                    currentMillis = millis();
+                    if (currentMillis - previousMillis >= interval)
+                    {
+                        Serial.println("Failed to connect.");
+                    }
+                }
+                Serial.print("Connected IP : ");
+                Serial.print(WiFi.localIP());
+                Serial.println("(Station Mode)");
+        */
+        Serial.print("wifi channel: ");
+        Serial.println(WiFi.channel());
+
         // configure device AP mode
         configDeviceAP();
+        Serial.print("wifi channel: ");
+        Serial.println(WiFi.channel());
+
         // This is the mac address of the Slave in AP Mode
         Serial.print("AP MAC: ");
         Serial.println(WiFi.softAPmacAddress());
@@ -317,7 +345,9 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
     switch (*data++) // *data++ == *(data++); 어떻게 해석해야될지 모르겠단말이지: *data(1번째 원소)로 switch넣고 나서 ++한다 -> 2번째 원소 가리키도록 함
     {
     case 0x01: // startTransmit() 전송 시작을 알리는 메시지: 전송 데이터량 고지
-        Serial.println("Start of new file transmit");
+        Serial.print("Start of new file transmit from CamId: ");
+        Serial.println(camId);
+
         currentTransmitCurrentPosition = 0;                    // 전송위치 초기화
         currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번째 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
         Serial.println("currentTransmitTotalPackages = " + String(currentTransmitTotalPackages));
@@ -342,7 +372,9 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         if (currentTransmitCurrentPosition == currentTransmitTotalPackages) // 현재 위치가 마지막 위치라면(index 상 전송 완료 이후 상태)
         {
             // showImage = 1; // 삭제 예정 - 이미지 표시기능
-            Serial.println("Done File Transfer");
+            Serial.print("Done File Transfer from Cam ID: ");
+            Serial.println(camId);
+
             File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str());
             Serial.println(file.size());
 
@@ -456,7 +488,7 @@ bool initWiFi()
         return false;
     }
 
-    WiFi.mode(WIFI_AP_STA); // AP, STA 동시 사용
+    WiFi.mode(WIFI_AP_STA); // AP, STA 동시 사용?
     localIP.fromString(ip.c_str());
     localGateway.fromString(gateway.c_str());
 
@@ -465,7 +497,7 @@ bool initWiFi()
         Serial.println("STA Failed to configure");
         return false;
     }
-    WiFi.begin(ssid.c_str(), pass.c_str());
+    WiFi.begin(ssid.c_str(), pass.c_str(), CHANNEL);
     Serial.println("Connecting to WiFi...");
 
     unsigned long currentMillis = millis();
