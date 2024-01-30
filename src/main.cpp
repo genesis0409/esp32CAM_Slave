@@ -33,14 +33,16 @@ String readFile(fs::FS &fs, const char *path);                     // Read File 
 void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
 bool initWiFi();                                                   // Initialize WiFi
 
+bool isFirebaseConfigDefined();
+
 // Search for parameter in HTTP POST request
 const char *PARAM_INPUT_1 = "ssid";
 const char *PARAM_INPUT_2 = "pass";
 const char *PARAM_INPUT_3 = "ip";
 const char *PARAM_INPUT_4 = "gateway";
 
-const char *PARAM_INPUT_5 = "Firebase API Key";
-const char *PARAM_INPUT_6 = "Storage Bucket ID";
+const char *PARAM_INPUT_5 = "api_key";
+const char *PARAM_INPUT_6 = "bucket_id";
 const char *PARAM_INPUT_7 = "user_email";
 const char *PARAM_INPUT_8 = "user_password";
 
@@ -80,7 +82,7 @@ unsigned long previousMillis = 0; // Stores last time using Reference time
 const long interval = 10000;      // interval to wait for Wi-Fi connection (milliseconds)
 
 // Master cam id check
-int camId;
+uint8_t camId;
 const int NUMBERofMASTER = 2;
 
 // for photo name
@@ -119,8 +121,8 @@ const uint32_t n_zero = 7; // zero padding
 // For example:
 // #define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
 
-// Photo File Name to save in LittleFS/SPIFFS
-#define FILE_PHOTO_NAME "photo"
+// Photo File Name to save in LittleFS/SPIFFS : CamId
+// #define FILE_PHOTO_NAME "photo"
 
 // Photo File Path to save in Firebase storage bucket
 // final path: /data/{camid}/photo.jpg
@@ -143,14 +145,39 @@ void setup()
 
     initSPIFFS();
 
-    // esp가 스테이션 모드에서 성공적으로 연결된 이후
-    // 웹 서버 요청을 처리하는 명령
-    if (initWiFi())
+    // Load values saved in SPIFFS
+    ssid = readFile(SPIFFS, ssidPath);
+    pass = readFile(SPIFFS, passPath);
+    ip = readFile(SPIFFS, ipPath);
+    gateway = readFile(SPIFFS, gatewayPath);
+
+    api_key = readFile(SPIFFS, api_keyPath);
+    bucket_id = readFile(SPIFFS, bucket_idPath);
+    user_email = readFile(SPIFFS, user_emailPath);
+    user_password = readFile(SPIFFS, user_passwordPath);
+
+    // esp가 스테이션 모드에서 성공적으로 연결된 이후(온라인)
+    if (isFirebaseConfigDefined())
     {
+        // initWiFi() &&
+        //  Set device in AP mode to begin with
+        //  WiFi.mode(WIFI_AP_STA); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
+        WiFi.mode(WIFI_AP);
+        // configure device AP mode
+        configDeviceAP();
+        // This is the mac address of the Slave in AP Mode
+        Serial.print("AP MAC: ");
+        Serial.println(WiFi.softAPmacAddress());
+        // Init ESPNow with a fallback logic
+        InitESPNow();
+        // Once ESPNow is successfully Init, we will register for recv CB to
+        // get recv packer info.
+        esp_now_register_recv_cb(OnDataRecv); // 수신 시 콜백함수 등록 (콜백: 파라미터로 함수 자체를 전달)
     }
-    // 스테이션 모드 연결 실패 시 AP모드 진입(wifi 재설정) softAP() 메소드
+    // 스테이션 모드(온라인) 연결 실패 시 AP모드 진입(wifi 재설정) softAP() 메소드
     else
     {
+        Serial.println("Undefiend Settings...");
         // Connect to Wi-Fi network with SSID and password
         Serial.println("Setting AP (Access Point)");
         // NULL sets an open Access Point
@@ -250,19 +277,6 @@ void setup()
       ESP.restart(); });
         server.begin();
     }
-
-    // Set device in AP mode to begin with
-    WiFi.mode(WIFI_AP_STA); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
-    // configure device AP mode
-    configDeviceAP();
-    // This is the mac address of the Slave in AP Mode
-    Serial.print("AP MAC: ");
-    Serial.println(WiFi.softAPmacAddress());
-    // Init ESPNow with a fallback logic
-    InitESPNow();
-    // Once ESPNow is successfully Init, we will register for recv CB to
-    // get recv packer info.
-    esp_now_register_recv_cb(OnDataRecv); // 수신 시 콜백함수 등록 (콜백: 파라미터로 함수 자체를 전달)
 }
 
 void loop()
@@ -287,31 +301,33 @@ void loop()
 // callback when data is recv from Master
 // 콜백함수: 마스터로부터 데이터 수신 시: esp_now_send(peer_addr, dataArray, dataArrayLength);
 // espnow 메시지 데이터를 받으면 case 통과하면서 전부 처리됨
+// camId와 같은 이름의 파일 쓰기/삭제: camId별 파일관리
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 {
-    camId = (*data++);
+    camId = *data++; // 0번째 원소: camId 쓰고 1번째 원소 가리켜 switch에 넣음
+    std::string FILE_PHOTO_NAME = std::to_string(camId);
 
+    /* // 보낼 때 지정하자
     std::string old_str = std::to_string(pictureNumber[camId]); // 0부터
     std::string new_str = std::string(n_zero - std::min(n_zero, old_str.length()), '0') + old_str;
 
     // Path where new picture will be saved in
     std::string path = "/CAM" + std::to_string(camId) + "_" + new_str + ".jpg"; // /CAM0_0000001.jpg
-    pictureNumber[camId]++;
-
-    switch (*data++) // *data++ == *(data++); 어떻게 해석해야될지 모르겠단말이지: *data(첫 번째 원소)로 switch넣고 나서 ++한다 -> 두 번째 원소 가리키도록 함
+    */
+    switch (*data++) // *data++ == *(data++); 어떻게 해석해야될지 모르겠단말이지: *data(1번째 원소)로 switch넣고 나서 ++한다 -> 2번째 원소 가리키도록 함
     {
     case 0x01: // startTransmit() 전송 시작을 알리는 메시지: 전송 데이터량 고지
         Serial.println("Start of new file transmit");
         currentTransmitCurrentPosition = 0;                    // 전송위치 초기화
-        currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번재 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
+        currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번째 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
         Serial.println("currentTransmitTotalPackages = " + String(currentTransmitTotalPackages));
-        SPIFFS.remove(path.c_str()); // 이전 파일 삭제; 이름은 자유; String 객체는 문자열 인자가 아님 -> 변환필요
+        SPIFFS.remove(("/" + FILE_PHOTO_NAME).c_str()); // 이전 파일 삭제; String 객체는 문자열 인자가 아님 -> char* 변환필요: .c_str()
         break;
     case 0x02: // sendNextPackage() 다음 패키지 전송을 위한 기능
         // Serial.println("chunk of file transmit");
         currentTransmitCurrentPosition = (*data++) << 8 | *data++; // 데이터 재구축: 같은 원리로 [현재 전송 위치] 복원
         // Serial.println("chunk NUMBER = " + String(currentTransmitCurrentPosition));
-        File file = SPIFFS.open(path.c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
+        File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
         if (!file)
             Serial.println("Error opening file ...");
 
@@ -327,11 +343,14 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         {
             // showImage = 1; // 삭제 예정 - 이미지 표시기능
             Serial.println("Done File Transfer");
-            File file = SPIFFS.open(FILE_PHOTO_NAME);
+            File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str());
             Serial.println(file.size());
-            file.close();
 
             // 파일 닫기 전후 쯤 firebase 저장기능 추가해야지 싶은데?
+
+            file.close();
+
+            pictureNumber[camId]++;
         }
 
         break;
@@ -341,7 +360,8 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 // Init ESP Now with fallback
 void InitESPNow()
 {
-    WiFi.disconnect(); // 끊지 않고 AP_STA 모드 활용하는 방안
+    // WiFi.disconnect(); // 끊지 않고 AP_STA 모드 활용하는 방안
+
     if (esp_now_init() == ESP_OK)
     {
         Serial.println("ESPNow Init Success");
@@ -436,7 +456,7 @@ bool initWiFi()
         return false;
     }
 
-    WiFi.mode(WIFI_STA);
+    WiFi.mode(WIFI_AP_STA); // AP, STA 동시 사용
     localIP.fromString(ip.c_str());
     localGateway.fromString(gateway.c_str());
 
@@ -463,5 +483,15 @@ bool initWiFi()
     Serial.print("Connected IP : ");
     Serial.print(WiFi.localIP());
     Serial.println("(Station Mode)");
+    return true;
+}
+
+bool isFirebaseConfigDefined()
+{
+    if (api_key == "" || bucket_id == "" || user_email == "" || user_password == "")
+    {
+        Serial.println("Undefined API_KEY/Bucket_ID or UserInfo.");
+        return false;
+    }
     return true;
 }
