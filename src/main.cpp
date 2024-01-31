@@ -162,10 +162,11 @@ void setup()
         // initWiFi() &&
         //  Set device in AP mode to begin with
         //  WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
-        // WiFi.mode(WIFI_AP_STA);
 
-        initWiFi();
-        // begin wifi
+        WiFi.mode(WIFI_AP_STA);
+
+        // initWiFi();
+        //  begin wifi
         /*
                 WiFi.begin(ssid.c_str(), pass.c_str(), CHANNEL);
                 Serial.println("Connecting to WiFi...");
