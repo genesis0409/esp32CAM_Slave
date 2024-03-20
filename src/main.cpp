@@ -28,6 +28,11 @@ void configDeviceAP();
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
 
+#include <esp_wifi.h> // espnow & wifi 동시 구동 핵심
+int32_t channel;
+
+int32_t getWiFiChannel(const char *ssid);
+
 void initSPIFFS();                                                 // Initialize SPIFFS
 String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
@@ -148,8 +153,8 @@ void setup()
     // Load values saved in SPIFFS
     ssid = readFile(SPIFFS, ssidPath);
     pass = readFile(SPIFFS, passPath);
-    ip = readFile(SPIFFS, ipPath);
-    gateway = readFile(SPIFFS, gatewayPath);
+    // ip = readFile(SPIFFS, ipPath);
+    // gateway = readFile(SPIFFS, gatewayPath);
 
     api_key = readFile(SPIFFS, api_keyPath);
     bucket_id = readFile(SPIFFS, bucket_idPath);
@@ -162,41 +167,21 @@ void setup()
         // initWiFi() &&
         //  Set device in AP mode to begin with
         //  WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
-
-        WiFi.mode(WIFI_AP_STA);
+        // WiFi.mode(WIFI_AP_STA);
 
         // initWiFi();
-        //  begin wifi
-        /*
-                WiFi.begin(ssid.c_str(), pass.c_str(), CHANNEL);
-                Serial.println("Connecting to WiFi...");
-
-                unsigned long currentMillis = millis();
-                previousMillis = currentMillis;
-
-                while (WiFi.status() != WL_CONNECTED)
-                {
-                    currentMillis = millis();
-                    if (currentMillis - previousMillis >= interval)
-                    {
-                        Serial.println("Failed to connect.");
-                    }
-                }
-                Serial.print("Connected IP : ");
-                Serial.print(WiFi.localIP());
-                Serial.println("(Station Mode)");
-        */
-        Serial.print("wifi channel: ");
-        Serial.println(WiFi.channel());
 
         // configure device AP mode
         configDeviceAP();
-        Serial.print("wifi channel: ");
-        Serial.println(WiFi.channel());
 
         // This is the mac address of the Slave in AP Mode
         Serial.print("AP MAC: ");
         Serial.println(WiFi.softAPmacAddress());
+
+        channel = getWiFiChannel(ssid.c_str());
+        Serial.print("WIFI Channel: ");
+        Serial.println(channel);
+
         // Init ESPNow with a fallback logic
         InitESPNow();
         // Once ESPNow is successfully Init, we will register for recv CB to
@@ -210,11 +195,11 @@ void setup()
         // Connect to Wi-Fi network with SSID and password
         Serial.println("Setting AP (Access Point)");
         // NULL sets an open Access Point
-        WiFi.softAP("ESP-WIFI-MANAGER", NULL);
+        WiFi.softAP("ESP-WIFI-MANAGER_Slave", NULL);
 
-        IPAddress IP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
+        IPAddress APIP = WiFi.softAPIP(); // Software enabled Access Point : 가상 라우터, 가상의 액세스 포인트
         Serial.print("AP IP address: ");
-        Serial.println(IP);
+        Serial.println(APIP);
 
         // Web Server Root URL
         // GET방식
@@ -245,22 +230,22 @@ void setup()
             // Write file to save value
             writeFile(SPIFFS, passPath, pass.c_str());
           }
-          // HTTP POST ip value
-          if (p->name() == PARAM_INPUT_3) {
-            ip = p->value().c_str();
-            Serial.print("IP Address set to: ");
-            Serial.println(ip);
-            // Write file to save value
-            writeFile(SPIFFS, ipPath, ip.c_str());
-          }
-          // HTTP POST gateway value
-          if (p->name() == PARAM_INPUT_4) {
-            gateway = p->value().c_str();
-            Serial.print("Gateway set to: ");
-            Serial.println(gateway);
-            // Write file to save value
-            writeFile(SPIFFS, gatewayPath, gateway.c_str());
-          }
+        //   // HTTP POST ip value
+        //   if (p->name() == PARAM_INPUT_3) {
+        //     ip = p->value().c_str();
+        //     Serial.print("IP Address set to: ");
+        //     Serial.println(ip);
+        //     // Write file to save value
+        //     writeFile(SPIFFS, ipPath, ip.c_str());
+        //   }
+        //   // HTTP POST gateway value
+        //   if (p->name() == PARAM_INPUT_4) {
+        //     gateway = p->value().c_str();
+        //     Serial.print("Gateway set to: ");
+        //     Serial.println(gateway);
+        //     // Write file to save value
+        //     writeFile(SPIFFS, gatewayPath, gateway.c_str());
+        //   }
           // HTTP POST API Key value
           if (p->name() == PARAM_INPUT_5)
           {
@@ -310,21 +295,8 @@ void setup()
 
 void loop()
 {
-    // if show image flag
-    // 삭제 예정
-    // if (showImage)
-    // {
-    //     showImage = 0;
-    //     gfx->fillScreen(BLACK);
-    //     unsigned long start = millis();
-    //     jpegClass.draw(&SPIFFS,
-    //                    (char *)"FILE_PHOTO_NAME", jpegDrawCallback, true /* useBigEndian */,
-    //                    0 /* x */, 0 /* y */, gfx->width() /* widthLimit */, gfx->height() /* heightLimit */);
-
-    //     Serial.printf("Time used: %lu\n", millis() - start);
-    // }
-
     // firebase에 보내는 기능 추가하면 되나?
+    // DO IT
 }
 
 // callback when data is recv from Master
@@ -383,7 +355,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 
             file.close();
 
-            pictureNumber[camId]++;
+            // pictureNumber[camId]++; // 파일 이름으로 쓰기엔 아쉬운 저장공간
         }
 
         break;
@@ -413,7 +385,8 @@ void InitESPNow()
 void configDeviceAP()
 {
     const char *SSID = "Slave_1";
-    bool result = WiFi.softAP(SSID, "Slave_1_Password", CHANNEL, 0);
+    // bool result = WiFi.softAP(SSID, "Slave_1_Password", CHANNEL, 0);
+    bool result = WiFi.softAP(SSID, "Slave_1_Password");
     if (!result)
     {
         Serial.println("AP Config failed.");
@@ -483,22 +456,22 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
 // Initialize WiFi
 bool initWiFi()
 {
-    if (ssid == "" || ip == "")
+    if (ssid == "")
     {
-        Serial.println("Undefined SSID or IP address.");
+        Serial.println("Undefined SSID.");
         return false;
     }
 
     WiFi.mode(WIFI_AP_STA); // AP, STA 동시 사용?
-    localIP.fromString(ip.c_str());
-    localGateway.fromString(gateway.c_str());
+    // localIP.fromString(ip.c_str());
+    // localGateway.fromString(gateway.c_str());
 
-    if (!WiFi.config(localIP, localGateway, subnet))
-    {
-        Serial.println("STA Failed to configure");
-        return false;
-    }
-    WiFi.begin(ssid.c_str(), pass.c_str(), CHANNEL);
+    // if (!WiFi.config(localIP, localGateway, subnet))
+    // {
+    //     Serial.println("STA Failed to configure");
+    //     return false;
+    // }
+    WiFi.begin(ssid.c_str(), pass.c_str());
     Serial.println("Connecting to WiFi...");
 
     unsigned long currentMillis = millis();
@@ -506,12 +479,14 @@ bool initWiFi()
 
     while (WiFi.status() != WL_CONNECTED)
     {
-        currentMillis = millis();
-        if (currentMillis - previousMillis >= interval)
-        {
-            Serial.println("Failed to connect.");
-            return false;
-        }
+        delay(1000);
+        Serial.print(".");
+        // currentMillis = millis();
+        // if (currentMillis - previousMillis >= interval)
+        // {
+        //     Serial.println("Failed to connect.");
+        //     return false;
+        // }
     }
     Serial.print("Connected IP : ");
     Serial.print(WiFi.localIP());
@@ -527,4 +502,20 @@ bool isFirebaseConfigDefined()
         return false;
     }
     return true;
+}
+
+// get Wifi Channel
+int32_t getWiFiChannel(const char *ssid)
+{
+    if (int32_t n = WiFi.scanNetworks())
+    {
+        for (uint8_t i = 0; i < n; i++)
+        {
+            if (!strcmp(ssid, WiFi.SSID(i).c_str()))
+            {
+                return WiFi.channel(i);
+            }
+        }
+    }
+    return 0;
 }
