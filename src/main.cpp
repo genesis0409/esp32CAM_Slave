@@ -11,7 +11,8 @@
 #include <esp_now.h>
 #include <WiFi.h>
 #define CHANNEL 1
-#include "SPIFFS.h" // already included
+// #include "SPIFFS.h" // already included
+#include "LittleFS.h"
 
 #include <time.h>
 #include <NTPClient.h>
@@ -47,7 +48,8 @@ int32_t channel;
 
 int32_t getWiFiChannel(const char *ssid);
 
-void initSPIFFS();                                                 // Initialize SPIFFS
+void initLittleFS(); // Initialize LittleFS
+// void initSPIFFS();                                                 // Initialize SPIFFS
 String readFile(fs::FS &fs, const char *path);                     // Read File from SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message); // Write file to SPIFFS
 bool initWiFi();                                                   // Initialize WiFi
@@ -162,18 +164,24 @@ void setup()
     Serial.begin(115200);
     Serial.println("ESPNow/Slave");
 
-    initSPIFFS();
+    // initSPIFFS();
+    initLittleFS();
 
-    // Load values saved in SPIFFS
-    ssid = readFile(SPIFFS, ssidPath);
-    pass = readFile(SPIFFS, passPath);
-    // ip = readFile(SPIFFS, ipPath);
-    // gateway = readFile(SPIFFS, gatewayPath);
+    // Load values saved in LittleFS
+    ssid = readFile(LittleFS, ssidPath);
+    pass = readFile(LittleFS, passPath);
+    // ip = readFile(LittleFS, ipPath);
+    // gateway = readFile(LittleFS, gatewayPath);
 
-    api_key = readFile(SPIFFS, api_keyPath);
-    bucket_id = readFile(SPIFFS, bucket_idPath);
-    user_email = readFile(SPIFFS, user_emailPath);
-    user_password = readFile(SPIFFS, user_passwordPath);
+    api_key = readFile(LittleFS, api_keyPath);
+    bucket_id = readFile(LittleFS, bucket_idPath);
+    user_email = readFile(LittleFS, user_emailPath);
+    user_password = readFile(LittleFS, user_passwordPath);
+
+    Serial.println(api_key);
+    Serial.println(bucket_id);
+    Serial.println(user_email);
+    Serial.println(user_password);
 
     // esp가 스테이션 모드에서 성공적으로 연결된 이후(온라인)
     if (isFirebaseConfigDefined())
@@ -231,9 +239,9 @@ void setup()
         // Web Server Root URL
         // GET방식
         server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-                  { request->send(SPIFFS, "/wifimanager.html", "text/html"); });
+                  { request->send(LittleFS, "/wifimanager.html", "text/html"); });
 
-        server.serveStatic("/", SPIFFS, "/");
+        server.serveStatic("/", LittleFS, "/");
         // POST방식
         server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
                   {
@@ -247,7 +255,7 @@ void setup()
             Serial.print("SSID set to: ");
             Serial.println(ssid);
             // Write file to save value
-            writeFile(SPIFFS, ssidPath, ssid.c_str());
+            writeFile(LittleFS, ssidPath, ssid.c_str());
           }
           // HTTP POST pass value
           if (p->name() == PARAM_INPUT_2) {
@@ -255,7 +263,7 @@ void setup()
             Serial.print("Password set to: ");
             Serial.println(pass);
             // Write file to save value
-            writeFile(SPIFFS, passPath, pass.c_str());
+            writeFile(LittleFS, passPath, pass.c_str());
           }
         //   // HTTP POST ip value
         //   if (p->name() == PARAM_INPUT_3) {
@@ -263,7 +271,7 @@ void setup()
         //     Serial.print("IP Address set to: ");
         //     Serial.println(ip);
         //     // Write file to save value
-        //     writeFile(SPIFFS, ipPath, ip.c_str());
+        //     writeFile(LittleFS, ipPath, ip.c_str());
         //   }
         //   // HTTP POST gateway value
         //   if (p->name() == PARAM_INPUT_4) {
@@ -271,7 +279,7 @@ void setup()
         //     Serial.print("Gateway set to: ");
         //     Serial.println(gateway);
         //     // Write file to save value
-        //     writeFile(SPIFFS, gatewayPath, gateway.c_str());
+        //     writeFile(LittleFS, gatewayPath, gateway.c_str());
         //   }
           // HTTP POST API Key value
           if (p->name() == PARAM_INPUT_5)
@@ -280,7 +288,7 @@ void setup()
               Serial.print("API Key set to: ");
               Serial.println(api_key);
               // Write file to save value
-              writeFile(SPIFFS, api_keyPath, api_key.c_str());
+              writeFile(LittleFS, api_keyPath, api_key.c_str());
           }
           // HTTP POST Bucket ID value
           if (p->name() == PARAM_INPUT_6)
@@ -289,7 +297,7 @@ void setup()
               Serial.print("Bucket ID set to: ");
               Serial.println(bucket_id);
               // Write file to save value
-              writeFile(SPIFFS, bucket_idPath, bucket_id.c_str());
+              writeFile(LittleFS, bucket_idPath, bucket_id.c_str());
           }
           // HTTP POST User Email value
           if (p->name() == PARAM_INPUT_7)
@@ -298,7 +306,7 @@ void setup()
               Serial.print("User Email set to: ");
               Serial.println(user_email);
               // Write file to save value
-              writeFile(SPIFFS, user_emailPath, user_email.c_str());
+              writeFile(LittleFS, user_emailPath, user_email.c_str());
           }
           // HTTP User Password value
           if (p->name() == PARAM_INPUT_8)
@@ -307,7 +315,7 @@ void setup()
               Serial.print("API Key set to: ");
               Serial.println(user_password);
               // Write file to save value
-              writeFile(SPIFFS, user_passwordPath, user_password.c_str());
+              writeFile(LittleFS, user_passwordPath, user_password.c_str());
           }
           //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
@@ -351,13 +359,15 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
         currentTransmitCurrentPosition = 0;                    // 전송위치 초기화
         currentTransmitTotalPackages = (*data++) << 8 | *data; // 데이터 재구축: 2번째 원소(2nd 8bits)를 Left Shift 하여 비트 OR로 3번째 원소(1st bits)와 합침 -> 패키지 수 표현하는 하위 16비트 재구축)
         Serial.println("currentTransmitTotalPackages = " + String(currentTransmitTotalPackages));
-        SPIFFS.remove(("/" + FILE_PHOTO_NAME).c_str()); // 이전 파일 삭제; String 객체는 문자열 인자가 아님 -> char* 변환필요: .c_str()
+        // SPIFFS.remove(("/" + FILE_PHOTO_NAME).c_str()); // 이전 파일 삭제; String 객체는 문자열 인자가 아님 -> char* 변환필요: .c_str()
+        LittleFS.remove(("/" + FILE_PHOTO_NAME).c_str()); // 이전 파일 삭제; String 객체는 문자열 인자가 아님 -> char* 변환필요: .c_str()
         break;
     case 0x02: // sendNextPackage() 다음 패키지 전송을 위한 기능
         // Serial.println("chunk of file transmit");
         currentTransmitCurrentPosition = (*data++) << 8 | *data++; // 데이터 재구축: 같은 원리로 [현재 전송 위치] 복원
         // Serial.println("chunk NUMBER = " + String(currentTransmitCurrentPosition));
-        File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
+        // File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
+        File file = LittleFS.open(("/" + FILE_PHOTO_NAME).c_str(), FILE_APPEND); // 파일을 덮어쓰지 않고 이어붙이도록 open
         if (!file)
             Serial.println("Error opening file ...");
 
@@ -375,10 +385,9 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
             Serial.print("Done File Transfer from Cam ID: ");
             Serial.println(camId);
 
-            File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str());
+            // File file = SPIFFS.open(("/" + FILE_PHOTO_NAME).c_str());
+            File file = LittleFS.open(("/" + FILE_PHOTO_NAME).c_str());
             Serial.println(file.size());
-
-            // 파일 닫기 전후 쯤 firebase 저장기능 추가해야지 싶은데?
 
             file.close();
 
@@ -388,15 +397,38 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
             configTime(3600 * timeZone, 3600 * summerTime, ntpServer);
             printLocalTime();
 
+            // while (WiFi.status() != WL_CONNECTED)
+            // {
+            //     WiFi.disconnect();
+            //     WiFi.mode(WIFI_STA);
+            //     WiFi.begin(ssid.c_str(), pass.c_str());
+            //     Serial.println("Connecting to WiFi...");
+
+            //     // unsigned long currentMillis = millis();
+            //     // previousMillis = currentMillis;
+            //     delay(1000);
+            //     Serial.print(".");
+            //     // currentMillis = millis();
+            //     // if (currentMillis - previousMillis >= interval)
+            //     // {
+            //     //     Serial.println("Failed to connect.");
+            //     //     return false;
+            //     // }
+            // }
+            // Serial.print("Connected IP : ");
+            // Serial.print(WiFi.localIP());
+            // Serial.println("(Station Mode)");
+
             // Upload files to Firebase
-            delay(10);
+            delay(1);
+
             if (Firebase.ready())
             {
                 Serial.print("Uploading picture... ");
 
                 // MIME type should be valid to avoid the download problem.
                 // The file systems for flash and SD/SDMMC can be changed in FirebaseFS.h.
-                if (Firebase.Storage.upload(&fbdo, bucket_id, ("/" + FILE_PHOTO_NAME).c_str(), mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO_PATH + strtim + ".jpg" /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */, fcsUploadCallback))
+                if (Firebase.Storage.upload(&fbdo, "esp32-send-img2firestorage.appspot.com", ("/" + FILE_PHOTO_NAME).c_str(), mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO_PATH + strtim + ".jpg" /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */, fcsUploadCallback))
                 {
                     Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
                 }
@@ -446,19 +478,34 @@ void configDeviceAP()
     }
 }
 
-// Initialize SPIFFS
-void initSPIFFS()
+// Initialize LittleFS
+void initLittleFS()
 {
-    // start spiffs
-    if (!SPIFFS.begin(true))
+    if (!LittleFS.begin(true))
     {
-        Serial.println(F("ERROR: File System Mount Failed!"));
+        Serial.println("An Error has occurred while mounting LittleFS");
+        ESP.restart();
     }
     else
     {
-        Serial.println(F("Success Init SPIFFS"));
+        delay(500);
+        Serial.println("LittleFS mounted successfully");
     }
 }
+
+// Initialize SPIFFS
+// void initSPIFFS()
+// {
+//     // start spiffs
+//     if (!SPIFFS.begin(true))
+//     {
+//         Serial.println(F("ERROR: File System Mount Failed!"));
+//     }
+//     else
+//     {
+//         Serial.println(F("Success Init SPIFFS"));
+//     }
+// }
 
 // Read File from SPIFFS
 String readFile(fs::FS &fs, const char *path)
