@@ -428,7 +428,7 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
 
                 // MIME type should be valid to avoid the download problem.
                 // The file systems for flash and SD/SDMMC can be changed in FirebaseFS.h.
-                if (Firebase.Storage.upload(&fbdo, "esp32-send-img2firestorage.appspot.com", ("/" + FILE_PHOTO_NAME).c_str(), mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO_PATH + strtim + ".jpg" /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */, fcsUploadCallback))
+                if (Firebase.Storage.upload(&fbdo, bucket_id, ("/" + FILE_PHOTO_NAME).c_str(), mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO_PATH + strtim + ".jpg" /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */, fcsUploadCallback))
                 {
                     Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
                 }
