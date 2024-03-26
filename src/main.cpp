@@ -13,6 +13,20 @@
 #define CHANNEL 1
 #include "SPIFFS.h" // already included
 
+#include <time.h>
+#include <NTPClient.h>
+
+void printLocalTime();
+int Year;
+int Month;
+int Day;
+int Hour;
+int Min;
+const char *ntpServer = "pool.ntp.org";
+uint8_t timeZone = 9;
+uint8_t summerTime = 0;
+String strtim;
+
 int currentTransmitCurrentPosition = 0;
 int currentTransmitTotalPackages = 0;
 
@@ -130,8 +144,8 @@ const uint32_t n_zero = 7; // zero padding
 // #define FILE_PHOTO_NAME "photo"
 
 // Photo File Path to save in Firebase storage bucket
-// final path: /data/{camid}/photo.jpg
-#define BUCKET_PHOTO_PATH "/data"
+// final path: /data/{time}.jpg
+#define BUCKET_PHOTO_PATH "/data/"
 
 // Define Firebase Data objects; 데이터 객체 정의
 FirebaseData fbdo;
@@ -169,7 +183,7 @@ void setup()
         //  WiFi.mode(WIFI_AP); // ESPNOW+WIFI 동시통신을 위해 WiFi.mode(WIFI_AP) 대신 WiFi.mode(WIFI_AP_STA) 사용
         // WiFi.mode(WIFI_AP_STA);
 
-        // initWiFi();
+        initWiFi();
 
         // configure device AP mode
         configDeviceAP();
@@ -178,15 +192,28 @@ void setup()
         Serial.print("AP MAC: ");
         Serial.println(WiFi.softAPmacAddress());
 
+        // Init ESPNow with a fallback logic
+        InitESPNow();
+
         channel = getWiFiChannel(ssid.c_str());
         Serial.print("WIFI Channel: ");
         Serial.println(channel);
 
-        // Init ESPNow with a fallback logic
-        InitESPNow();
         // Once ESPNow is successfully Init, we will register for recv CB to
         // get recv packer info.
         esp_now_register_recv_cb(OnDataRecv); // 수신 시 콜백함수 등록 (콜백: 파라미터로 함수 자체를 전달)
+
+        // Firebase Setup; Firebase 구성 객체에 다음 설정 할당
+        // Assign the api key
+        configF.api_key = api_key;
+        // Assign the user sign in credentials
+        auth.user.email = user_email;
+        auth.user.password = user_password;
+        // Assign the callback function for the long running token generation task; 콜백함수
+        configF.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
+
+        Firebase.begin(&configF, &auth);
+        Firebase.reconnectNetwork(true); // Firebase.reconnectWiFi(true); is deprecated.
     }
     // 스테이션 모드(온라인) 연결 실패 시 AP모드 진입(wifi 재설정) softAP() 메소드
     else
@@ -296,7 +323,7 @@ void setup()
 void loop()
 {
     // firebase에 보내는 기능 추가하면 되나?
-    // DO IT
+    // espnow 콜백함수에서 받자마자 처리하는게 나아보이는데
 }
 
 // callback when data is recv from Master
@@ -356,6 +383,28 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len)
             file.close();
 
             // pictureNumber[camId]++; // 파일 이름으로 쓰기엔 아쉬운 저장공간
+
+            //  시간 객체 사용 - 파일이름으로
+            configTime(3600 * timeZone, 3600 * summerTime, ntpServer);
+            printLocalTime();
+
+            // Upload files to Firebase
+            delay(10);
+            if (Firebase.ready())
+            {
+                Serial.print("Uploading picture... ");
+
+                // MIME type should be valid to avoid the download problem.
+                // The file systems for flash and SD/SDMMC can be changed in FirebaseFS.h.
+                if (Firebase.Storage.upload(&fbdo, bucket_id, ("/" + FILE_PHOTO_NAME).c_str(), mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO_PATH + strtim + ".jpg" /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */, fcsUploadCallback))
+                {
+                    Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
+                }
+                else
+                {
+                    Serial.println(fbdo.errorReason());
+                }
+            }
         }
 
         break;
@@ -474,8 +523,8 @@ bool initWiFi()
     WiFi.begin(ssid.c_str(), pass.c_str());
     Serial.println("Connecting to WiFi...");
 
-    unsigned long currentMillis = millis();
-    previousMillis = currentMillis;
+    // unsigned long currentMillis = millis();
+    // previousMillis = currentMillis;
 
     while (WiFi.status() != WL_CONNECTED)
     {
@@ -518,4 +567,57 @@ int32_t getWiFiChannel(const char *ssid)
         }
     }
     return 0;
+}
+
+// The Firebase Storage upload callback function
+void fcsUploadCallback(FCS_UploadStatusInfo info)
+{
+    if (info.status == firebase_fcs_upload_status_init)
+    {
+        Serial.printf("Uploading file %s (%d) to %s\n", info.localFileName.c_str(), info.fileSize, info.remoteFileName.c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_upload)
+    {
+        Serial.printf("Uploaded %d%s, Elapsed time %d ms\n", (int)info.progress, "%", info.elapsedTime);
+    }
+    else if (info.status == firebase_fcs_upload_status_complete)
+    {
+        Serial.println("Upload completed\n");
+        FileMetaInfo meta = fbdo.metaData();
+        Serial.printf("Name: %s\n", meta.name.c_str());
+        Serial.printf("Bucket: %s\n", meta.bucket.c_str());
+        Serial.printf("contentType: %s\n", meta.contentType.c_str());
+        Serial.printf("Size: %d\n", meta.size);
+        Serial.printf("Generation: %lu\n", meta.generation);
+        Serial.printf("Metageneration: %lu\n", meta.metageneration);
+        Serial.printf("ETag: %s\n", meta.etag.c_str());
+        Serial.printf("CRC32: %s\n", meta.crc32.c_str());
+        Serial.printf("Tokens: %s\n", meta.downloadTokens.c_str());
+        Serial.printf("Download URL: %s\n\n", fbdo.downloadURL().c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_error)
+    {
+        Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
+    }
+}
+
+void printLocalTime()
+{
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo))
+    {
+        Serial.println("Failed to obtain time");
+        return;
+        // delay(500);
+    }
+    Serial.println("Successed to obtain time");
+    Year = timeinfo.tm_year + 1900;
+    Month = timeinfo.tm_mon + 1;
+    Day = timeinfo.tm_mday;
+    Hour = timeinfo.tm_hour;
+    Min = timeinfo.tm_min;
+    strtim = String(Year) + "-" + String(Month) + "-" + String(Day) + " " + String(Hour) + ":" + String(Min); // 2024-01-01 01:01
+    Serial.println(strtim);
+
+    // Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
 }
